@@ -34,6 +34,62 @@ class AccountInvoice(models.Model):
         ).write({'state': 'invoiced'})
         return super(AccountInvoice, self).invoice_validate()
 
+    @api.model
+    def create(self, vals):
+        """Create commission agents when invoice is paid for payment-based commissions."""
+        invoice = super(AccountInvoice, self).create(vals)
+        # If invoice is already paid, create commission agents for payment-based commissions
+        if invoice.state == 'paid':
+            invoice._create_payment_based_commissions()
+        return invoice
+
+    def write(self, vals):
+        """Create commission agents when invoice becomes paid for payment-based commissions."""
+        result = super(AccountInvoice, self).write(vals)
+        # Check if state changed to 'paid'
+        if 'state' in vals and vals['state'] == 'paid':
+            for invoice in self:
+                if invoice.state == 'paid':
+                    invoice._create_payment_based_commissions()
+        return result
+
+    def _create_payment_based_commissions(self):
+        """Create commission agents for payment-based commissions when invoice is paid.
+        
+        This method ensures that commission records are only created for payment-based
+        commissions after the invoice is fully paid, preventing premature commission
+        creation when using job queues.
+        """
+        for invoice in self:
+            # Only process customer invoices
+            if invoice.type[:3] != "out":
+                continue
+            # Check if invoice is actually paid
+            if invoice.state != 'paid':
+                continue
+            # Create agents for lines that don't have them yet for payment-based commissions
+            for line in invoice.invoice_line_ids:
+                # Check if line already has payment-based commission agents
+                has_payment_based = any(
+                    agent.commission.invoice_state == 'paid'
+                    for agent in line.agents
+                )
+                if not has_payment_based:
+                    # Get partner agents for payment-based commissions
+                    partner = invoice.partner_id
+                    agents_to_create = []
+                    for agent in partner.agents:
+                        # Only create agents for payment-based commissions
+                        if agent.commission.invoice_state == 'paid':
+                            agents_to_create.append((0, 0, {
+                                'agent': agent.id,
+                                'commission': agent.commission.id,
+                            }))
+                    if agents_to_create:
+                        # Preserve existing agents and add payment-based ones
+                        existing_agent_ids = [(4, agent.id) for agent in line.agents]
+                        line.agents = existing_agent_ids + agents_to_create
+
     def _refund_cleanup_lines(self, lines):
         """ugly function to map all fields of account.invoice.line
         when creates refund invoice"""
@@ -53,7 +109,15 @@ class AccountInvoice(models.Model):
         return res
 
     def recompute_lines_agents(self):
-        self.mapped('invoice_line_ids').recompute_agents()
+        """Recompute agents for invoice lines, respecting payment status for payment-based commissions."""
+        for invoice in self:
+            # For payment-based commissions, only recompute if invoice is paid
+            if invoice.state == 'paid':
+                invoice.mapped('invoice_line_ids').recompute_agents()
+            else:
+                # For non-paid invoices, only recompute non-payment-based commissions
+                for line in invoice.invoice_line_ids:
+                    line._recompute_agents_skip_payment_based()
 
 
 class AccountInvoiceLine(models.Model):
@@ -84,13 +148,24 @@ class AccountInvoiceLine(models.Model):
 
     @api.model
     def create(self, vals):
-        """Add agents for records created from automations instead of UI."""
+        """Add agents for records created from automations instead of UI.
+        
+        For payment-based commissions, agents are only created when the invoice
+        is paid. This prevents premature commission creation when using job queues.
+        """
         # We use this form as this is the way it's returned when no real vals
         agents_vals = vals.get('agents', [(6, 0, [])])
         invoice_id = vals.get('invoice_id', False)
         if (agents_vals and agents_vals[0][0] == 6 and not
                 agents_vals[0][2] and invoice_id):
-            vals['agents'] = self._prepare_agents_vals(vals=vals)
+            invoice = self.env['account.invoice'].browse(invoice_id)
+            # Check if invoice is paid and if any commission requires payment
+            if invoice.state == 'paid':
+                # Invoice is paid, create all agents
+                vals['agents'] = self._prepare_agents_vals(vals=vals)
+            else:
+                # Invoice not paid yet, only create agents for non-payment-based commissions
+                vals['agents'] = self._prepare_agents_vals_skip_payment_based(vals=vals)
         return super().create(vals)
 
     def _prepare_agents_vals(self, vals=None):
@@ -102,6 +177,65 @@ class AccountInvoiceLine(models.Model):
         if invoice.type[:3] != "out":
             return [(6, 0, [])]
         return res + self._prepare_agents_vals_partner(invoice.partner_id)
+
+    def _prepare_agents_vals_skip_payment_based(self, vals=None):
+        """Prepare agent values but skip payment-based commissions.
+        
+        This method is used when invoice is not yet paid to prevent creating
+        commission records for payment-based commissions prematurely.
+        """
+        res = super()._prepare_agents_vals(vals=vals)
+        if self:
+            invoice = self.invoice_id
+        else:
+            invoice = self.env['account.invoice'].browse(vals['invoice_id'])
+        if invoice.type[:3] != "out":
+            return [(6, 0, [])]
+        # Only include agents with non-payment-based commissions
+        partner = invoice.partner_id
+        agents_vals = []
+        for agent in partner.agents:
+            if agent.commission.invoice_state != 'paid':
+                agents_vals.append((0, 0, {
+                    'agent': agent.id,
+                    'commission': agent.commission.id,
+                }))
+        return res + agents_vals
+
+    def _recompute_agents_skip_payment_based(self):
+        """Recompute agents but skip payment-based commissions if invoice is not paid.
+        
+        This ensures that payment-based commissions are only created when
+        the invoice is actually paid, even when recompute is called.
+        """
+        self.ensure_one()
+        invoice = self.invoice_id
+        if invoice.state == 'paid':
+            # Invoice is paid, recompute all agents
+            self.recompute_agents()
+        else:
+            # Invoice not paid, only keep/recompute non-payment-based commissions
+            # Get existing non-payment-based agent IDs
+            existing_agent_ids = {
+                agent.agent.id for agent in self.agents
+                if agent.commission.invoice_state != 'paid'
+            }
+            # Prepare agents list: keep existing non-payment-based ones
+            agents_to_keep = [
+                (4, agent.id) for agent in self.agents
+                if agent.commission.invoice_state != 'paid'
+            ]
+            # Add non-payment-based commission agents from partner that don't exist yet
+            partner = invoice.partner_id
+            for agent in partner.agents:
+                if (agent.commission.invoice_state != 'paid' and
+                        agent.id not in existing_agent_ids):
+                    agents_to_keep.append((0, 0, {
+                        'agent': agent.id,
+                        'commission': agent.commission.id,
+                    }))
+            # Remove payment-based commission agents and set the new list
+            self.agents = [(5, 0, 0)] + agents_to_keep
 
 
 class AccountInvoiceLineAgent(models.Model):
