@@ -1,15 +1,41 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
 
+    <!-- Extend partner form to show employee and PM fields -->
     <record model="ir.ui.view" id="view_partner_form_agent">
         <field name="model">res.partner</field>
         <field name="inherit_id" ref="sale_commission.view_partner_form_agent" />
         <field name="arch" type="xml">
+            <!-- Add employee field after commission -->
             <field name="commission" position="after">
-                <field name="employee"
-                       attrs="{'invisible': [('agent_type', '!=', 'salesman')]}"
-                />
+                <field name="employee_id"
+                       attrs="{'invisible': [('agent_type', 'not in', ['salesman', 'project_manager'])]}"/>
             </field>
+            
+            <!-- Add PM-specific fields after settlement -->
+            <field name="settlement" position="after">
+                <field name="pm_commission_rate"
+                       attrs="{'invisible': [('agent_type', '!=', 'project_manager')]}"/>
+                <field name="managed_projects_count"
+                       attrs="{'invisible': [('agent_type', '!=', 'project_manager')]}"/>
+            </field>
+        </field>
+    </record>
+
+    <!-- Extend partner search view for agent types -->
+    <record model="ir.ui.view" id="view_res_partner_filter_agent_type">
+        <field name="name">res.partner.search.agent_type</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="sale_commission.view_res_partner_filter" />
+        <field name="arch" type="xml">
+            <filter name="agent" position="after">
+                <filter string="Salesmen" name="salesman" 
+                    domain="[('agent', '=', True), ('agent_type', '=', 'salesman')]"/>
+                <filter string="Project Managers" name="project_manager" 
+                    domain="[('agent', '=', True), ('agent_type', '=', 'project_manager')]"/>
+                <filter string="External Agents" name="external_agent" 
+                    domain="[('agent', '=', True), ('agent_type', '=', 'agent')]"/>
+            </filter>
         </field>
     </record>
 

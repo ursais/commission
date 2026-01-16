@@ -3,13 +3,14 @@
 
 {
     'name': 'HR commissions',
-    'version': '12.0.1.1.0',
+    'version': '12.0.2.0.0',
     'author': 'Tecnativa,'
               'Odoo Community Association (OCA)',
     "category": "Commissions",
+    'summary': 'HR Commissions with approval workflow and payment tracking',
     'depends': [
         'sale_commission',
-        'hr'
+        'hr',
     ],
     'license': 'AGPL-3',
     "data": [

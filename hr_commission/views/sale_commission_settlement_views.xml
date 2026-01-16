@@ -1,18 +1,133 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
 
+    <!-- Extend settlement form view with approval and payment tracking -->
     <record model="ir.ui.view" id="view_settlement_form">
-        <field name="name">Settlements - Add "Mark as invoiced" button</field>
+        <field name="name">Settlements - HR Commission Enhancements</field>
         <field name="model">sale.commission.settlement</field>
         <field name="inherit_id" ref="sale_commission.view_settlement_form" />
         <field name="arch" type="xml">
+            <!-- Add approval and mark as invoiced buttons -->
             <button name="action_invoice" position="before">
+                <button string="Approve"
+                    attrs="{'invisible': ['|', ('approval_state', '!=', 'pending'), ('state', '=', 'cancel')]}"
+                    class="oe_highlight"
+                    type="object"
+                    name="action_approve" />
+                <button string="Reject"
+                    attrs="{'invisible': ['|', ('approval_state', '!=', 'pending'), ('state', '=', 'cancel')]}"
+                    type="object"
+                    name="action_reject" />
+                <button string="Reset Approval"
+                    attrs="{'invisible': ['|', ('approval_state', '=', 'pending'), ('state', '=', 'invoiced')]}"
+                    type="object"
+                    name="action_reset_approval" />
+                <button string="Mark as Paid"
+                    attrs="{'invisible': ['|', ('approval_state', '!=', 'approved'), ('payment_state', '=', 'paid')]}"
+                    class="oe_highlight"
+                    type="object"
+                    name="action_mark_paid" />
                 <button string="Mark as invoiced"
-                    attrs="{'invisible': ['|', ('state', '!=', 'settled'), ('agent_type', '!=', 'salesman')]}"
+                    attrs="{'invisible': ['|', '|', ('state', '!=', 'settled'), ('agent_type', '!=', 'salesman'), ('approval_state', '!=', 'approved')]}"
                     class="oe_highlight"
                     type="object"
                     name="mark_as_invoiced" />
             </button>
+            
+            <!-- Add approval status bar -->
+            <field name="state" position="before">
+                <field name="approval_state" widget="statusbar" 
+                    statusbar_visible="pending,approved"/>
+            </field>
+
+            <!-- Add sales order info and approval fields to the form -->
+            <field name="date_to" position="after">
+                <field name="sale_order_total" widget="monetary" 
+                    options="{'currency_field': 'currency_id'}"/>
+                <field name="sale_order_count"/>
+                <button name="action_view_sale_orders" type="object"
+                    string="View Orders" class="oe_link"
+                    attrs="{'invisible': [('sale_order_count', '=', 0)]}"/>
+            </field>
+            
+            <!-- Add approval tracking group -->
+            <group string="Commission lines" position="before">
+                <group string="Approval Status" colspan="2">
+                    <group>
+                        <field name="approval_state" readonly="1"/>
+                        <field name="approved_by"/>
+                        <field name="approval_date"/>
+                    </group>
+                    <group>
+                        <field name="approval_notes"/>
+                    </group>
+                </group>
+            </group>
+            
+            <!-- Add payment tracking group -->
+            <group string="Commission lines" position="before">
+                <group string="Payment Status" colspan="2">
+                    <group>
+                        <field name="payment_state"/>
+                        <field name="payment_date"/>
+                        <field name="payment_reference"/>
+                    </group>
+                    <group>
+                        <field name="amount_paid" widget="monetary"
+                            options="{'currency_field': 'currency_id'}"/>
+                        <field name="amount_due" widget="monetary"
+                            options="{'currency_field': 'currency_id'}"/>
+                    </group>
+                </group>
+            </group>
+        </field>
+    </record>
+
+    <!-- Extend settlement tree view with new columns -->
+    <record model="ir.ui.view" id="view_settlement_tree_extend">
+        <field name="name">Settlements tree - HR Commission Enhancements</field>
+        <field name="model">sale.commission.settlement</field>
+        <field name="inherit_id" ref="sale_commission.view_settlement_tree" />
+        <field name="arch" type="xml">
+            <field name="state" position="before">
+                <field name="sale_order_total" sum="Sales Total"/>
+                <field name="approval_state"/>
+                <field name="payment_state"/>
+            </field>
+        </field>
+    </record>
+
+    <!-- Extend settlement search view with new filters -->
+    <record model="ir.ui.view" id="view_settlement_search_extend">
+        <field name="name">Settlements search - HR Commission Enhancements</field>
+        <field name="model">sale.commission.settlement</field>
+        <field name="inherit_id" ref="sale_commission.view_settlement_search" />
+        <field name="arch" type="xml">
+            <field name="company_id" position="after">
+                <field name="approval_state"/>
+                <field name="payment_state"/>
+            </field>
+            <filter name="group_date" position="after">
+                <separator/>
+                <filter string="Pending Approval" name="pending_approval"
+                    domain="[('approval_state', '=', 'pending')]"/>
+                <filter string="Approved" name="approved"
+                    domain="[('approval_state', '=', 'approved')]"/>
+                <filter string="Rejected" name="rejected"
+                    domain="[('approval_state', '=', 'rejected')]"/>
+                <separator/>
+                <filter string="Not Paid" name="not_paid"
+                    domain="[('payment_state', '=', 'not_paid')]"/>
+                <filter string="Partially Paid" name="partial_paid"
+                    domain="[('payment_state', '=', 'partial')]"/>
+                <filter string="Fully Paid" name="fully_paid"
+                    domain="[('payment_state', '=', 'paid')]"/>
+                <separator/>
+                <filter string="Approval Status" name="group_approval"
+                    context="{'group_by': 'approval_state'}"/>
+                <filter string="Payment Status" name="group_payment"
+                    context="{'group_by': 'payment_state'}"/>
+            </filter>
         </field>
     </record>
 
