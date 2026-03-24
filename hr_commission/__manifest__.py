@@ -3,7 +3,7 @@
 
 {
     'name': 'HR commissions',
-    'version': '12.0.1.1.0',
+    'version': '12.0.1.1.1',
     'author': 'Tecnativa,'
               'Odoo Community Association (OCA)',
     "category": "Commissions",
@@ -11,6 +11,7 @@
         'sale_commission',
         'hr'
     ],
+    'website': 'https://github.com/OCA/commission',
     'license': 'AGPL-3',
     "data": [
         "views/res_partner_view.xml",

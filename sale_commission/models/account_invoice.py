@@ -19,9 +19,28 @@ class AccountInvoice(models.Model):
         compute="_compute_commission_total",
         store=True,
     )
+    agent_ids = fields.Many2many(
+        "res.partner", string="Agents", compute="_compute_agents",
+        search="_search_agents")
+
+    @api.multi
+    def _compute_agents(self):
+        for so in self:
+            so.agent_ids = [(6, 0, so.mapped("invoice_line_ids.agents.agent").ids)]
+
+    @api.model
+    def _search_agents(self, operator, value):
+        ail_agents = self.env["account.invoice.line.agent"].search(
+            [("agent", operator, value)])
+        return [('id', 'in', ail_agents.mapped("object_id.invoice_id").ids)]
 
     def action_cancel(self):
-        """Put settlements associated to the invoices in exception."""
+        """Put settlements associated to the invoices in exception
+        and check settled lines"""
+        if any(self.mapped("invoice_line_ids.any_settled")):
+            raise exceptions.ValidationError(
+                _("You can't cancel an invoice with settled lines"),
+            )
         settlements = self.env['sale.commission.settlement'].search(
             [('invoice', 'in', self.ids)])
         settlements.write({'state': 'except_invoice'})
@@ -82,16 +101,17 @@ class AccountInvoiceLine(models.Model):
         for record in self:
             record.any_settled = any(record.mapped('agents.settled'))
 
-    @api.model
-    def create(self, vals):
+    @api.model_create_multi
+    def create(self, vals_list):
         """Add agents for records created from automations instead of UI."""
         # We use this form as this is the way it's returned when no real vals
-        agents_vals = vals.get('agents', [(6, 0, [])])
-        invoice_id = vals.get('invoice_id', False)
-        if (agents_vals and agents_vals[0][0] == 6 and not
-                agents_vals[0][2] and invoice_id):
-            vals['agents'] = self._prepare_agents_vals(vals=vals)
-        return super().create(vals)
+        for vals in vals_list:
+            agents_vals = vals.get('agents', [(6, 0, [])])
+            invoice_id = vals.get('invoice_id', False)
+            if (agents_vals and agents_vals[0][0] == 6 and not
+                    agents_vals[0][2] and invoice_id):
+                vals['agents'] = self._prepare_agents_vals(vals=vals)
+        return super().create(vals_list)
 
     def _prepare_agents_vals(self, vals=None):
         res = super()._prepare_agents_vals(vals=vals)
