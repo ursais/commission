@@ -8,10 +8,10 @@ class CommissionSettlement(models.Model):
     _inherit = "commission.settlement"
 
     invoice_partner_id = fields.Many2one(
-        "res.partner", compute="_compute_invoice_partner_id"
+        "res.partner", compute="_compute_invoice_partner_id", store=True
     )
 
-    @api.depends("agent_id.delegated_agent_id")
+    @api.depends("agent_id", "agent_id.delegated_agent_id")
     def _compute_invoice_partner_id(self):
         for record in self:
             record.invoice_partner_id = record._get_invoice_partner()
